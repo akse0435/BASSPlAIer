@@ -39,22 +39,23 @@ SetCompressor /SOLID lzma
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${EXENAME}"
 
 ; MUI's default icon carries 7 images, i.e. 7 RT_ICON resources. installer.ico
-; holds a single 32x32 image, so the uninstaller (which !packhdr below cannot
-; reach) ends up with one icon resource instead of seven.
+; holds a single 32x32 16-colour image (744 bytes as a resource), so the
+; installer and the uninstaller carry one icon resource each instead of seven.
 !define MUI_ICON   "installer.ico"
 !define MUI_UNICON "installer.ico"
 
-; Strip the icon resources from the installer itself. !packhdr runs the command
-; on the exe stub while it is being built - before the data is appended and the
-; CRC is computed - so unlike editing the finished installer this does not trip
-; the "installer corrupted" check. strip-icons.rh deletes both the icon group
-; and the RT_ICON entries it points at, leaving no icon resource at all;
-; Windows then draws its generic exe icon. RESHACKER is passed by CI:
-;   makensis /DRESHACKER=C:\path\to\ResourceHacker.exe ...
-; Without it the installer simply keeps the single icon from installer.ico.
-!ifdef RESHACKER
-  !packhdr "exehead.tmp" '"${RESHACKER}" -script strip-icons.rh -log CONSOLE'
-!endif
+; One icon is the floor here - do not try to strip it entirely. Deleting the
+; icon resources from the exe stub via !packhdr does work (it runs before the
+; data is appended and the CRC is computed, so the "corrupted" check stays
+; happy), but makensis then aborts with
+;   Error generating uninstaller icon: invalid icon offset
+; because installer and uninstaller share one stub: at run time the installer
+; writes a copy of its own stub out as Uninstall.exe and patches the
+; uninstaller icon in at offsets makensis derives from the stub's icon
+; resources. With the resources gone there is nothing to patch. Deleting only
+; the icon group (as the NSIS wiki recipe does) fails the same way, since the
+; group is what those offsets come from. Removing WriteUninstaller would be the
+; only way out, which is not worth an icon.
 
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
@@ -89,9 +90,49 @@ Section "BASS PlAIer (required)" SEC_APP
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 SectionEnd
 
-Section /o "Desktop shortcut" SEC_DESKTOP
+Section "Desktop shortcut" SEC_DESKTOP
+  ; CreateShortcut takes its working directory from $OUTDIR, so pin it to
+  ; $INSTDIR rather than inheriting whatever the previous section left.
+  SetOutPath "$INSTDIR"
   CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\${EXENAME}"
 SectionEnd
+
+; Format plugins. The player loads every .dll in its plugins folder at
+; start-up, so dropping one in is all it takes to add that format.
+SectionGroup "Extra format plugins" SEC_PLUGINS
+  Section /o "Opus (.opus)" SEC_PL_OPUS
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bassopus.dll"
+  SectionEnd
+  Section /o "FLAC (.flac)" SEC_PL_FLAC
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bassflac.dll"
+  SectionEnd
+  Section /o "AAC (.aac, .m4a)" SEC_PL_AAC
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bass_aac.dll"
+  SectionEnd
+  Section /o "Apple Lossless (.m4a)" SEC_PL_ALAC
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bassalac.dll"
+  SectionEnd
+  Section /o "WavPack (.wv)" SEC_PL_WV
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\basswv.dll"
+  SectionEnd
+  Section /o "Monkey's Audio (.ape)" SEC_PL_APE
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bassape.dll"
+  SectionEnd
+  Section /o "DSD (.dsf, .dff)" SEC_PL_DSD
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bassdsd.dll"
+  SectionEnd
+  Section /o "Speex (.spx)" SEC_PL_SPX
+    SetOutPath "$INSTDIR\plugins"
+    File "release\plugins\bass_spx.dll"
+  SectionEnd
+SectionGroupEnd
 
 Section "Associate audio files with BASSPlAIer" SEC_ASSOC
   ; ProgID describing how to open a file with the player
@@ -123,6 +164,19 @@ Section "Uninstall"
   Delete "$INSTDIR\bassenc.dll"
   Delete "$INSTDIR\README.html"
   Delete "$INSTDIR\Uninstall.exe"
+
+  ; only the plugins we shipped; RMDir without /r leaves the folder alone if
+  ; the user dropped their own BASS add-ons in there
+  Delete "$INSTDIR\plugins\bassopus.dll"
+  Delete "$INSTDIR\plugins\bassflac.dll"
+  Delete "$INSTDIR\plugins\bass_aac.dll"
+  Delete "$INSTDIR\plugins\bassalac.dll"
+  Delete "$INSTDIR\plugins\basswv.dll"
+  Delete "$INSTDIR\plugins\bassape.dll"
+  Delete "$INSTDIR\plugins\bassdsd.dll"
+  Delete "$INSTDIR\plugins\bass_spx.dll"
+  RMDir  "$INSTDIR\plugins"
+
   RMDir  "$INSTDIR"
   Delete "$SMPROGRAMS\${APPNAME}.lnk"
   Delete "$DESKTOP\${APPNAME}.lnk"
