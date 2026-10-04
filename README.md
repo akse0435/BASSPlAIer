@@ -22,6 +22,7 @@ The player is written entirely by AI, hence the name.
 - Independent pitch shift in semitones (`BASS_ATTRIB_TEMPO_PITCH`) and playback sample-rate / frequency control in 100 Hz steps (`BASS_ATTRIB_TEMPO_FREQ`).
 - Command box (`C`): type `30` to jump to 30 minutes, `+5` / `-3` to seek relative, `t75` to set tempo, `p6` for pitch, `q44100` for frequency, `v150` for volume.
 - 10-band graphic equalizer with BASS_FX (`BASS_FX_BFX_PEAKEQ`) at centres 80, 160, 320, 450, 900 Hz, 1.8, 3.6, 7, 10, 14 kHz. The band gains are also applied to the recording.
+- Optional BPM detection with BASS_FX (`BASS_FX_BPM_DecodeGet`), hidden by default: press `Ctrl+B` to show the row and analyse the track in a background thread. While the row is shown each new track is analysed as it starts, and the reading follows the speed and frequency settings.
 - Recording of what is currently playing to a `.wav` file with BASSenc (`BASS_Encode_Start` / `BASS_Encode_Stop`).
 - Time, status, length, tempo etc. are shown continuously in a `SysListView32` (report view).
 
@@ -55,6 +56,8 @@ The player is written entirely by AI, hence the name.
 | `Ctrl`+`1`…`9`, `0` | Reset that EQ band to 0 dB |
 | `I` / `Shift+I` | Cut / boost all EQ bands 1 dB |
 | `Ctrl+I` | Reset all EQ bands to flat |
+| `Ctrl+B` | Show the BPM row and detect it from the current position |
+| `Ctrl+Shift+B` | Hide the BPM row again |
 | `R` | Start recording |
 | `E` | Stop recording |
 | `Alt+F4` | Quit |
@@ -65,10 +68,11 @@ The player is written entirely by AI, hence the name.
 
 ## Download
 
-Prebuilt x64 packages are attached to each [GitHub release](../../releases): a portable
-`.zip` and a Windows installer (`BASSPlAIer-Setup.exe`, built with NSIS) that adds
-Start-menu and desktop shortcuts and an uninstaller, and registers the audio formats so
-they can be opened from Explorer's **Open with** menu. The BASS DLLs are bundled in.
+Prebuilt packages are attached to each [GitHub release](../../releases): a portable x64
+`.zip`, a portable 32-bit `.zip` (`BASSPlAIer-x86.zip`, see below), and a Windows
+installer (`BASSPlAIer-Setup.exe`, built with NSIS, x64) that adds Start-menu and desktop
+shortcuts and an uninstaller, and registers the audio formats so they can be opened from
+Explorer's **Open with** menu. The BASS DLLs are bundled in.
 
 Format plugins for Opus, FLAC, AAC, Apple Lossless, WavPack, Monkey's Audio, DSD and Speex are
 offered on the installer's components page — none are ticked by default, so pick the ones
@@ -100,8 +104,24 @@ cl /O2 player.c version.res /link bass.lib bass_fx.lib bassenc.lib comctl32.lib 
 The version is taken from the `APPVERSION` environment variable (dotted, e.g. `1.2.3`;
 defaults to `0.0.0`) and is embedded as the exe's product name / version info.
 
+### 32-bit build (experimental)
+
+`build32.bat` produces a 32-bit exe with **PE subsystem 4.0**, i.e. one the Windows 95
+and NT 4.0 loaders will accept. It uses MinGW-w64's i686 `gcc` and `windres` rather than
+MSVC, whose linker enforces a minimum subsystem version of 5.01 and silently discards
+anything lower (`LNK4010`). It links straight against the DLLs, so no MinGW import
+libraries are needed, and is built for size: `-Os -ffunction-sections
+-Wl,--gc-sections -s`. CI builds it in a separate job and attaches the resulting
+`BASSPlAIer-x86.zip` to the release.
+
+How far back it actually runs is untested: the exe is only one of three layers. The BASS
+DLLs have their own requirements, the listview styles need comctl32 4.70 (the IE 4 era,
+not a bare NT 4.0 install), and NT 4.0 has very limited DirectSound, so `BASS_Init` is
+likelier to succeed on Windows 95/98 than on NT 4.0.
+
 ## Notes
 
 - The stream is created as a decoder channel (`BASS_STREAM_DECODE`) and wrapped in `BASS_FX_TempoCreate`, so the tempo can be changed live. `BASS_FX_FREESOURCE` ensures the source is freed automatically.
+- The BPM row is hidden until you press `Ctrl+B`, and nothing is analysed while it is hidden. BASS_FX always returns its best guess, so material without a clear beat gives a meaningless number rather than nothing - which is why it is off by default. `Ctrl+Shift+B` hides it again. The BPM is found with `BASS_FX_BPM_DecodeGet` on a separate decoding channel of the same file (60 seconds of audio, range 45-230 BPM). It runs in a worker thread, so playback and the UI are not held up; until the result arrives the row shows `analysing...`. The row shows the BPM of the file itself, and when the speed is changed with tempo or frequency also the current BPM. Pressing `Ctrl+B` again analyses from where you are - useful for tracks that change tempo along the way, or where the intro fools the detection.
 - The recording captures exactly the samples the playing channel delivers — including the tempo change — because the encoder is attached to the tempo stream.
 - Each recording gets a unique name with date and time (`recording_20260620_143005.wav`), so earlier recordings are not overwritten. The file is written as a WAV in the channel's own format — the channel runs in float, so the result is a 32-bit float WAV. Add `BASS_ENCODE_FP_16BIT` to `BASS_Encode_Start` if you want 16-bit integer instead. If you want MP3/OGG instead, BASSenc can be hooked up to a command-line encoder (`BASS_Encode_Start` with an encoder command).
